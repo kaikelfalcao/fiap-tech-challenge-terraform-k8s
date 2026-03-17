@@ -10,7 +10,7 @@ public_subnet_cidrs  = ["10.2.101.0/24", "10.2.102.0/24", "10.2.103.0/24"]
 
 # EKS
 cluster_version     = "1.29"
-node_instance_types = ["t3.large"]
+node_instance_types = ["t3.micro"]
 node_desired_size   = 3
 node_min_size       = 3
 node_max_size       = 6
