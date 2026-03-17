@@ -6,6 +6,10 @@ on:
       - develop
       - main
 
+concurrency:
+  group: terraform-pr-${{ github.event.pull_request.base.ref }}
+  cancel-in-progress: true
+
 jobs:
   terraform-check:
     runs-on: ubuntu-latest
@@ -36,9 +40,9 @@ jobs:
       - name: Terraform Plan
         run: |
           if [[ "${{ github.base_ref }}" == "main" ]]; then
-            terraform plan -var-file=environments/prod.tfvars
+            terraform plan -lock=false -var-file=environments/prod.tfvars -no-color
           elif [[ "${{ github.base_ref }}" == "develop" ]]; then
-            terraform plan -var-file=environments/staging.tfvars
+            terraform plan -lock=false -var-file=environments/staging.tfvars -no-color
           else
-            terraform plan -var-file=environments/dev.tfvars
+            terraform plan -lock=false -var-file=environments/dev.tfvars -no-color
           fi
