@@ -57,10 +57,6 @@ jobs:
           terraform apply -auto-approve -input=false \
             -var-file="environments/${TFVARS}.tfvars" \
             -var="newrelic_license_key=${{ secrets.NEWRELIC_LICENSE_KEY }}" \
-            -var="lambda_function_name=${{ secrets.LAMBDA_FUNCTION_NAME }}" \
-            -var="aws_access_key_id=${{ secrets.AWS_ACCESS_KEY_ID }}" \
-            -var="aws_secret_access_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
-            -var="aws_session_token=${{ secrets.AWS_SESSION_TOKEN }}" \
             -target=module.vpc \
             -target=module.eks \
             -target=aws_security_group.rds \
