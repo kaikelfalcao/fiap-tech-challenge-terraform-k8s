@@ -1,0 +1,42 @@
+# New Relic Bundle Helm Values
+# Arquivo de configuração para instalação do New Relic no EKS
+
+global:
+  licenseKey: "586e901e3d286e9c15862a4b363cdf3bFFFFNRAL"
+  cluster: "tech-challenge"
+  lowDataMode: true
+
+# Kube State Metrics
+kube-state-metrics:
+  enabled: true
+  image:
+    tag: "v2.13.0"
+
+# Kube Events
+kubeEvents:
+  enabled: true
+
+# New Relic Prometheus Agent
+newrelic-prometheus-agent:
+  enabled: true
+  lowDataMode: true
+  config:
+    kubernetes:
+      integrations_filter:
+        enabled: false
+
+# NR eBPF Agent (para monitoramento de infraestrutura)
+nr-ebpf-agent:
+  enabled: true
+
+# K8s Agents Operator
+k8s-agents-operator:
+  enabled: true
+
+# Logging
+logging:
+  enabled: true
+
+newrelic-logging:
+  lowDataMode: true
+
