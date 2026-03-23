@@ -1,6 +1,7 @@
+# SG do RDS — acesso dos nodes EKS e da Lambda
 resource "aws_security_group" "rds" {
   name_prefix = "${var.project_name}-${var.environment}-rds-"
-  description = "Security group for RDS PostgreSQL - allows access from EKS nodes"
+  description = "Security group for RDS PostgreSQL"
   vpc_id      = module.vpc.vpc_id
 
   ingress {
@@ -11,8 +12,15 @@ resource "aws_security_group" "rds" {
     security_groups = [module.eks.node_security_group_id]
   }
 
+  ingress {
+    description     = "PostgreSQL from Lambda"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.lambda.id]
+  }
+
   egress {
-    description = "Allow all outbound"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -21,6 +29,29 @@ resource "aws_security_group" "rds" {
 
   tags = {
     Name = "${var.project_name}-${var.environment}-rds-sg"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# SG da Lambda — sem regras de ingress (Lambda só faz egress para o RDS)
+resource "aws_security_group" "lambda" {
+  name_prefix = "${var.project_name}-${var.environment}-lambda-"
+  description = "Security group for Auth Lambda"
+  vpc_id      = module.vpc.vpc_id
+
+  egress {
+    description = "Allow all outbound (RDS + internet para JWT lib)"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-${var.environment}-lambda-sg"
   }
 
   lifecycle {

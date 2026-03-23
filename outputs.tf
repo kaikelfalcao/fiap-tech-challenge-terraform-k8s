@@ -56,3 +56,13 @@ output "cluster_update_kubeconfig_command" {
   description = "AWS CLI command to update kubeconfig"
   value       = "aws eks update-kubeconfig --region ${var.region} --name ${module.eks.cluster_name}"
 }
+
+output "lambda_security_group_id" {
+  description = "Security group ID para a Lambda de autenticação"
+  value       = aws_security_group.lambda.id
+}
+
+output "kong_proxy_url" {
+  description = "URL do Kong proxy (após LoadBalancer provisionar)"
+  value       = "kubectl get svc -n kong kong-kong-proxy -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'"
+}

@@ -12,33 +12,66 @@ concurrency:
 
 jobs:
   terraform-apply:
-    if: github.event_name == 'push' && (github.ref_name == 'develop' || github.ref_name == 'main')
     runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'develop' }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.5"
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: us-east-1
 
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Plan
+      - name: Bootstrap backend S3
         run: |
-          if [[ "${{ github.ref_name }}" == "main" ]]; then
-            terraform plan -var-file=environments/prod.tfvars -out=tfplan
-          else
-            terraform plan -var-file=environments/staging.tfvars -out=tfplan
-          fi
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET="fiap-tc-tfstate-${ACCOUNT_ID}"
+          aws s3 ls "s3://${BUCKET}" > /dev/null 2>&1 || \
+            aws s3 mb "s3://${BUCKET}" --region us-east-1
+          cat > backend.tf << EOF
+          terraform {
+            backend "s3" {
+              bucket       = "${BUCKET}"
+              key          = "k8s-infra/terraform.tfstate"
+              region       = "us-east-1"
+              use_lockfile = true
+              encrypt      = true
+            }
+          }
+          EOF
 
-      - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      - name: Terraform Apply — Fase 1 (EKS + Kong + New Relic)
+        run: |
+          TFVARS=$([[ "${{ github.ref_name }}" == "main" ]] && echo "prod" || echo "staging")
+          terraform apply -auto-approve -input=false \
+            -var-file="environments/${TFVARS}.tfvars" \
+            -var="newrelic_license_key=${{ secrets.NEWRELIC_LICENSE_KEY }}" \
+            -var="lambda_function_name=${{ secrets.LAMBDA_FUNCTION_NAME }}" \
+            -var="aws_access_key_id=${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            -var="aws_secret_access_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            -var="aws_session_token=${{ secrets.AWS_SESSION_TOKEN }}" \
+            -target=module.vpc \
+            -target=module.eks \
+            -target=aws_security_group.rds \
+            -target=aws_security_group.lambda \
+            -target=helm_release.kong \
+            -target=helm_release.newrelic \
+            -target=kubernetes_namespace.kong \
+            -target=kubernetes_namespace.newrelic
+
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig \
+            --region us-east-1 \
+            --name fiap-tc-dev-eks

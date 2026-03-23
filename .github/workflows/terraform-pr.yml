@@ -15,21 +15,40 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.5"
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: us-east-1
 
+      - name: Bootstrap backend S3
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET="fiap-tc-tfstate-${ACCOUNT_ID}"
+          aws s3 ls "s3://${BUCKET}" > /dev/null 2>&1 || \
+            aws s3 mb "s3://${BUCKET}" --region us-east-1
+          cat > backend.tf << EOF
+          terraform {
+            backend "s3" {
+              bucket       = "${BUCKET}"
+              key          = "k8s-infra/terraform.tfstate"
+              region       = "us-east-1"
+              use_lockfile = true
+              encrypt      = true
+            }
+          }
+          EOF
+
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -input=false
 
       - name: Terraform Format Check
         run: terraform fmt -check -recursive
@@ -40,9 +59,31 @@ jobs:
       - name: Terraform Plan
         run: |
           if [[ "${{ github.base_ref }}" == "main" ]]; then
-            terraform plan -lock=false -var-file=environments/prod.tfvars -no-color
+            TFVARS="prod"
           elif [[ "${{ github.base_ref }}" == "develop" ]]; then
-            terraform plan -lock=false -var-file=environments/staging.tfvars -no-color
+            TFVARS="staging"
           else
-            terraform plan -lock=false -var-file=environments/dev.tfvars -no-color
+            TFVARS="dev"
           fi
+          terraform plan -lock=false -input=false -no-color \
+            -var-file="environments/${TFVARS}.tfvars" \
+            -var="newrelic_license_key=${{ secrets.NEWRELIC_LICENSE_KEY }}" \
+            -var="lambda_function_name=${{ secrets.LAMBDA_FUNCTION_NAME }}" \
+            -var="aws_access_key_id=${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            -var="aws_secret_access_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            -var="aws_session_token=${{ secrets.AWS_SESSION_TOKEN }}" \
+            2>&1 | tee plan.txt
+
+      - name: Comment plan on PR
+        uses: actions/github-script@v7
+        if: always()
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('plan.txt', 'utf8').slice(-60000);
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Terraform Plan\n\`\`\`hcl\n${plan}\n\`\`\``
+            });
