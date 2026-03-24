@@ -1,6 +1,10 @@
+data "aws_iam_role" "lab_role" {
+  name = "LabRole"
+}
+
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "~> 20.8"
+  version = "~> 18.31"
 
   cluster_name    = "${var.project_name}-${var.environment}-eks"
   cluster_version = var.cluster_version
@@ -11,36 +15,29 @@ module "eks" {
   cluster_endpoint_public_access  = true
   cluster_endpoint_private_access = true
 
-  enable_cluster_creator_admin_permissions = true
+  create_iam_role = false
+  iam_role_arn    = data.aws_iam_role.lab_role.arn
+
+  enable_irsa = false
 
   cluster_addons = {
-    coredns = {
-      most_recent = true
-    }
-    kube-proxy = {
-      most_recent = true
-    }
-    vpc-cni = {
-      most_recent = true
-    }
+    coredns    = { most_recent = true }
+    kube-proxy = { most_recent = true }
+    vpc-cni    = { most_recent = true }
   }
 
   eks_managed_node_groups = {
     default = {
-      name = "${var.project_name}-${var.environment}-nodes"
-
+      name           = "${var.project_name}-${var.environment}-nodes"
       instance_types = var.node_instance_types
       capacity_type  = "ON_DEMAND"
+      min_size       = var.node_min_size
+      max_size       = var.node_max_size
+      desired_size   = var.node_desired_size
+      disk_size      = var.node_disk_size
 
-      min_size     = var.node_min_size
-      max_size     = var.node_max_size
-      desired_size = var.node_desired_size
-
-      disk_size = var.node_disk_size
-
-      iam_role_additional_policies = {
-        AmazonSSMManagedInstanceCore = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-      }
+      create_iam_role = false
+      iam_role_arn    = data.aws_iam_role.lab_role.arn
 
       labels = {
         Environment = var.environment
@@ -62,8 +59,15 @@ module "eks" {
       type        = "ingress"
       self        = true
     }
+    egress_rds = {
+      description = "Nodes to RDS PostgreSQL"
+      protocol    = "tcp"
+      from_port   = 5432
+      to_port     = 5432
+      type        = "egress"
+      cidr_blocks = ["10.0.0.0/16"]
+    }
   }
-
   tags = {
     Name = "${var.project_name}-${var.environment}-eks"
   }

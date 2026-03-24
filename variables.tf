@@ -45,13 +45,13 @@ variable "public_subnet_cidrs" {
 variable "cluster_version" {
   description = "Kubernetes version for EKS cluster"
   type        = string
-  default     = "1.29"
+  default     = "1.31"
 }
 
 variable "node_instance_types" {
   description = "EC2 instance types for EKS managed node group"
   type        = list(string)
-  default     = ["t3.micro"]
+  default     = ["t3.medium"]
 }
 
 variable "node_desired_size" {
@@ -75,5 +75,19 @@ variable "node_max_size" {
 variable "node_disk_size" {
   description = "Disk size in GB for each node"
   type        = number
-  default     = 50
+  default     = 20
 }
+
+# New Relic
+variable "newrelic_license_key" {
+  description = "New Relic license key (ingest)"
+  type        = string
+  sensitive   = true
+}
+
+variable "lambda_function_name" {
+  description = "Nome da função Lambda de autenticação (lido do state S3 na pipeline; use como fallback local)"
+  type        = string
+  default     = "autoflow-auth-homolog"
+}
+
