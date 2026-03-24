@@ -33,13 +33,9 @@ jobs:
 
       - name: Resolve tfvars file
         run: |
-          if [[ "${{ github.base_ref }}" == "main" ]]; then
-            echo "TF_VAR_FILE=environments/prod.tfvars" >> "$GITHUB_ENV"
-          elif [[ "${{ github.base_ref }}" == "develop" ]]; then
-            echo "TF_VAR_FILE=environments/staging.tfvars" >> "$GITHUB_ENV"
-          else
-            echo "TF_VAR_FILE=environments/dev.tfvars" >> "$GITHUB_ENV"
-          fi
+          # AWS Lab só suporta dev — uma única conta com limite de EIPs e roles.
+          # Todos os PRs usam dev.tfvars para evitar estourar cotas do Lab.
+          echo "TF_VAR_FILE=environments/dev.tfvars" >> "$GITHUB_ENV"
 
       - name: Resolve lambda_function_name from S3 state
         run: |
