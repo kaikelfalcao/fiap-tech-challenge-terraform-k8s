@@ -9,24 +9,46 @@ New Relic e todos os recursos de rede via Terraform.
 | --------------- | --------------------------------------- |
 | Cloud           | AWS (EKS, VPC, NLB, Security Groups)    |
 | IaC             | Terraform 1.7+                          |
-| Kubernetes      | EKS 1.31                                |
+| Kubernetes      | EKS 1.29                                |
 | API Gateway     | Kong 2.38 (DB-less, Ingress Controller) |
 | Observabilidade | New Relic nri-bundle 5.0                |
 | CI/CD           | GitHub Actions                          |
 
 ## Arquitetura
 
-```
-Internet
-    │
-    ▼
-Kong (NLB público)
-    ├── POST /auth  →  aws-lambda plugin  →  Lambda (autoflow-auth-homolog)
-    └── /api/*      →  autoflow.autoflow.svc.cluster.local (NestJS)
-                               │
-                               ▼
-                         RDS PostgreSQL
-                         (subnet privada)
+```mermaid
+graph TD
+    Internet((Internet))
+
+    subgraph AWS["AWS — us-east-1"]
+        NLB["Kong NLB\n(público)"]
+
+        subgraph VPC["VPC 10.0.0.0/16"]
+            subgraph PublicSubnet["Subnets Públicas"]
+                NAT[NAT Gateway]
+            end
+
+            subgraph PrivateSubnet["Subnets Privadas"]
+                subgraph EKS["EKS — autoflow namespace"]
+                    NestJS["NestJS API\n(2–6 réplicas, HPA)"]
+                end
+                RDS[("RDS PostgreSQL 16")]
+                Lambda["Lambda\nautoflow-auth-homolog"]
+            end
+
+            subgraph NewRelic["namespace: newrelic"]
+                NRI["nri-bundle\n(infra · logs · eventos)"]
+            end
+        end
+    end
+
+    Internet --> NLB
+    NLB -->|"POST /auth"| Lambda
+    NLB -->|"/api/*"| NestJS
+    NestJS --> RDS
+    Lambda --> RDS
+    NRI -.->|"metrics · logs"| NewRelicCloud["New Relic Cloud"]
+    NestJS -.->|"APM · traces"| NewRelicCloud
 ```
 
 ## Posição no fluxo multi-repo
@@ -43,7 +65,7 @@ do state S3 — nenhum valor de infra precisa ser copiado manualmente.
 ```
 
 O state deste repo fica em:
-`s3://fiap-tc-tfstate-{ACCOUNT_ID}/k8s-infra/terraform.tfstate`
+`s3://fiap-tech-challenge-tfstate-fase3-matheus/k8s-infra/terraform.tfstate`
 
 Outputs usados pelos outros repos:
 
@@ -58,27 +80,41 @@ Outputs usados pelos outros repos:
 ## Estrutura
 
 ```
-eks.tf              ← cluster EKS + node group (LabRole)
-vpc.tf              ← VPC, subnets públicas/privadas, NAT gateway
-kong.tf             ← Kong Helm release + rotas /auth e /api/*
-newrelic.tf         ← New Relic nri-bundle (infra, logs, eventos)
-security-groups.tf  ← SGs do RDS e da Lambda
-k8s_secrets.tf      ← namespace autoflow + kubernetes_secret app-secrets (JWT)
-outputs.tf          ← endpoints, IDs de SG e subnets
-variables.tf        ← todas as variáveis com descrições
-versions.tf         ← versões dos providers
+eks.tf               ← cluster EKS + node group (LabRole)
+vpc.tf               ← VPC, subnets públicas/privadas, NAT gateway
+kong.tf              ← Kong Helm release + rotas /auth e /api/*
+newrelic.tf          ← New Relic nri-bundle (infra, logs, eventos)
+newrelic_monitoring.tf ← dashboard + alert policy (Terraform)
+security-groups.tf   ← SGs do RDS e da Lambda
+k8s_secrets.tf       ← namespace autoflow + kubernetes_secret app-secrets (JWT)
+outputs.tf           ← endpoints, IDs de SG e subnets
+variables.tf         ← todas as variáveis com descrições
+versions.tf          ← versões dos providers
 
 environments/
-  dev.tfvars        ← configuração de desenvolvimento
-  staging.tfvars    ← configuração de homologação
-  prod.tfvars       ← configuração de produção
+  dev.tfvars         ← configuração de desenvolvimento
+  staging.tfvars     ← configuração de homologação
+  prod.tfvars        ← configuração de produção
 
 scripts/
-  bootstrap.sh      ← cria bucket S3 e gera backend.tf
-  local-plan.sh     ← valida plano localmente
-  local-apply.sh    ← aplica Fase 1 + Fase 2 localmente
-  local-destroy.sh  ← destrói tudo localmente (com confirmação)
+  bootstrap.sh       ← cria bucket S3 e gera backend.tf
+  local-plan.sh      ← valida plano localmente
+  local-apply.sh     ← aplica Fase 1 + Fase 2 localmente
+  local-destroy.sh   ← destrói tudo localmente (com confirmação)
+  set-github-secrets.sh ← configura secrets em todos os repos
 ```
+
+## Observabilidade
+
+O repo provisiona monitoramento completo via New Relic:
+
+| Recurso | Descrição |
+|---|---|
+| `nri-bundle` | Coleta métricas K8s, logs e eventos (Fluent Bit) |
+| `newrelic_one_dashboard` | Dashboard com 4 páginas: Ordens de Serviço, APIs & Performance, Kubernetes, Erros & Integrações |
+| `newrelic_alert_policy` | 5 condições: taxa de erros, latência P95, pod fora do ar, erros de integração, falhas em ordens |
+
+Acesse os dashboards em **[one.newrelic.com](https://one.newrelic.com)** após o deploy.
 
 ## Configurar secrets no GitHub
 
@@ -124,20 +160,21 @@ source .env.local
 | `AWS_ACCESS_KEY_ID`     | Credencial AWS Lab                                |
 | `AWS_SECRET_ACCESS_KEY` | Credencial AWS Lab                                |
 | `AWS_SESSION_TOKEN`     | Session token (obrigatório no Lab, expira em ~4h) |
-| `NEWRELIC_LICENSE_KEY`  | Chave de ingest do New Relic                      |
+| `NEWRELIC_LICENSE_KEY`  | Chave de ingest do New Relic (licença)            |
+| `NEWRELIC_ACCOUNT_ID`   | ID numérico da conta New Relic                    |
+| `NEWRELIC_API_KEY`      | User API Key (`NRAK-...`) para Terraform          |
 
 > `lambda_function_name` não é um secret — é lido automaticamente do state S3
 > do repo lambda durante o deploy.
->
-> `JWT_SECRET` é gerenciado pelo **repo codebase**, que cria o
-> `kubernetes_secret autoflow-secrets` no namespace `autoflow`.
 
 ## CI/CD
 
-| Evento         | Comportamento                               |
-| -------------- | ------------------------------------------- |
-| PR para `main` | `terraform fmt` + `validate` + `plan`       |
-| Merge em `main`| Deploy completo (Fase 1 + Fase 2)           |
+| Evento                | Comportamento                                         |
+| --------------------- | ----------------------------------------------------- |
+| PR para `main`        | `terraform fmt` + `validate` + `plan`                 |
+| PR para `develop`     | `terraform fmt` + `validate` + `plan` (staging vars)  |
+| Merge em `main`       | Deploy completo (Fase 1 + Fase 2) com `prod.tfvars`   |
+| Push em `develop`     | Deploy completo com `staging.tfvars`                  |
 
 ## Subir localmente
 
@@ -158,6 +195,8 @@ Copie as credenciais do painel do AWS Academy:
 ```bash
 cp .env.local.example .env.local
 # edite .env.local com AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN
+# e as chaves New Relic (license key, account id, api key)
+source .env.local
 ```
 
 ### 3. Fase 1 — infra base (~15 min)
@@ -207,3 +246,10 @@ O script pede confirmação digitando `destroy` antes de executar.
 - Todos os recursos usam a `LabRole` existente (`enable_irsa = false`)
 - O session token expira em ~4h — atualize as credenciais antes de cada deploy
 - `backend.tf` é gerado pelo `bootstrap.sh` e está no `.gitignore`
+
+## Autores
+
+- João Miguel
+- Kaike Falcão
+- Matheus Hurtado
+- Thalita Silva
