@@ -17,8 +17,8 @@ resource "helm_release" "newrelic" {
   version    = "5.0.88"
 
   wait          = true
-  wait_for_jobs = true
-  timeout       = 300
+  wait_for_jobs = false
+  timeout       = 600
 
   values = [
     <<-YAML
