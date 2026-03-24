@@ -33,44 +33,89 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Resolve tfvars file
+      # ── Bootstrap (igual ao script local) ───────────────────────────────
+      - name: Bootstrap Terraform backend
         run: |
-          # AWS Lab só suporta dev — uma única conta com limite de EIPs e roles.
-          # Todos os branches usam dev.tfvars para evitar estourar cotas do Lab.
-          echo "TF_VAR_FILE=environments/dev.tfvars" >> "$GITHUB_ENV"
+          set -e
 
-      # Lê lambda_function_name do state S3 do repo lambda.
-      # Se o repo lambda ainda não foi deployado, usa o valor padrão da variável.
+          REGION=${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET="fiap-tc-tfstate-${ACCOUNT_ID}"
+
+          echo "Account : $ACCOUNT_ID"
+          echo "Bucket  : $BUCKET"
+          echo "Region  : $REGION"
+
+          if aws s3 ls "s3://${BUCKET}" > /dev/null 2>&1; then
+            echo "Bucket já existe"
+          else
+            echo "Criando bucket..."
+            aws s3 mb "s3://${BUCKET}" --region "$REGION"
+
+            aws s3api put-bucket-versioning \
+              --bucket "$BUCKET" \
+              --versioning-configuration Status=Enabled
+
+            aws s3api put-bucket-encryption \
+              --bucket "$BUCKET" \
+              --server-side-encryption-configuration \
+                '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+
+            echo "Bucket criado"
+          fi
+
+          cat > backend.tf << EOF
+          terraform {
+            backend "s3" {
+              bucket       = "${BUCKET}"
+              key          = "k8s-infra/terraform.tfstate"
+              region       = "${REGION}"
+              use_lockfile = true
+              encrypt      = true
+            }
+          }
+          EOF
+
+          echo "backend.tf gerado"
+
+      # ── Init ───────────────────────────────────────────────────────────
+      - run: terraform init -input=false -reconfigure
+
+      # ── Resolve tfvars (igual pipeline atual) ───────────────────────────
+      - name: Resolve tfvars file
+        run: echo "TF_VAR_FILE=environments/dev.tfvars" >> "$GITHUB_ENV"
+
+      # ── Lambda name (igual script local) ────────────────────────────────
       - name: Resolve lambda_function_name from S3 state
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          BUCKET="fiap-tech-challenge-tfstate-fase3-matheus"
+          BUCKET="fiap-tc-tfstate-${ACCOUNT_ID}"
+
           LAMBDA_NAME=$(aws s3 cp "s3://${BUCKET}/lambda/terraform.tfstate" - 2>/dev/null | \
             jq -r '.outputs.function_name.value // empty' 2>/dev/null || true)
-          LAMBDA_NAME="${LAMBDA_NAME:-autoflow-auth-homolog}"
+
+          LAMBDA_NAME="${LAMBDA_NAME:-${TF_VAR_lambda_function_name:-autoflow-auth-homolog}}"
+
           echo "LAMBDA_FUNCTION_NAME=${LAMBDA_NAME}" >> "$GITHUB_ENV"
-          echo "lambda_function_name resolved: ${LAMBDA_NAME}"
+          echo "lambda_function_name = ${LAMBDA_NAME}"
 
-      - run: terraform init -input=false
-
-      - name: Limpar log group existente (AWS Lab re-apply)
+      # ── Limpeza (igual script) ──────────────────────────────────────────
+      - name: Limpar log group existente
         run: |
-          # O módulo EKS tenta criar o log group mas ele pode já existir de um apply anterior.
-          # Remove preventivamente para evitar ResourceAlreadyExistsException.
-          CLUSTER="fiap-tc-dev-eks"
           aws logs delete-log-group \
-            --log-group-name "/aws/eks/${CLUSTER}/cluster" \
+            --log-group-name /aws/eks/fiap-tc-dev-eks/cluster \
             --region "$AWS_REGION" 2>/dev/null \
-            && echo "Log group deletado" || echo "Log group não existia, ok"
+            && echo "Log group deletado" || echo "Log group não existe, ok"
 
+      # ── Fase 1 ─────────────────────────────────────────────────────────
       - name: Apply — Fase 1 (infra base)
         run: |
           terraform apply -auto-approve -input=false \
             -var-file="${{ env.TF_VAR_FILE }}" \
+            -var="lambda_function_name=${{ env.LAMBDA_FUNCTION_NAME }}" \
             -var="newrelic_license_key=${{ secrets.NEWRELIC_LICENSE_KEY }}" \
             -var="newrelic_account_id=${{ secrets.NEWRELIC_ACCOUNT_ID }}" \
             -var="newrelic_api_key=${{ secrets.NEWRELIC_API_KEY }}" \
-            -var="lambda_function_name=${{ env.LAMBDA_FUNCTION_NAME }}" \
             -target=module.vpc \
             -target=module.eks \
             -target=aws_security_group.rds \
@@ -78,26 +123,37 @@ jobs:
             -target=helm_release.kong \
             -target=helm_release.newrelic \
             -target=kubernetes_namespace.kong \
-            -target=kubernetes_namespace.newrelic \
-            -target=kubernetes_namespace.autoflow
+            -target=kubernetes_namespace.newrelic
 
+      # ── kubectl ────────────────────────────────────────────────────────
       - name: Configure kubectl
-        run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name fiap-tc-dev-eks
+        run: |
+          CLUSTER_NAME=$(terraform output -raw cluster_name 2>/dev/null || echo "fiap-tc-dev-eks")
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name "$CLUSTER_NAME"
 
-      # Relê o lambda_function_name — pode ter sido atualizado entre a Fase 1 e aqui.
+      # ── Refresh lambda ─────────────────────────────────────────────────
       - name: Refresh lambda_function_name
         run: |
-          BUCKET="fiap-tech-challenge-tfstate-fase3-matheus"
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET="fiap-tc-tfstate-${ACCOUNT_ID}"
+
           LAMBDA_NAME=$(aws s3 cp "s3://${BUCKET}/lambda/terraform.tfstate" - 2>/dev/null | \
             jq -r '.outputs.function_name.value // empty' 2>/dev/null || true)
+
           LAMBDA_NAME="${LAMBDA_NAME:-${{ env.LAMBDA_FUNCTION_NAME }}}"
+
           echo "LAMBDA_FUNCTION_NAME=${LAMBDA_NAME}" >> "$GITHUB_ENV"
 
+      # ── Fase 2 ─────────────────────────────────────────────────────────
       - name: Apply — Fase 2 (Kong routes + manifests)
         run: |
           terraform apply -auto-approve -input=false \
             -var-file="${{ env.TF_VAR_FILE }}" \
+            -var="lambda_function_name=${{ env.LAMBDA_FUNCTION_NAME }}" \
             -var="newrelic_license_key=${{ secrets.NEWRELIC_LICENSE_KEY }}" \
             -var="newrelic_account_id=${{ secrets.NEWRELIC_ACCOUNT_ID }}" \
-            -var="newrelic_api_key=${{ secrets.NEWRELIC_API_KEY }}" \
-            -var="lambda_function_name=${{ env.LAMBDA_FUNCTION_NAME }}"
+            -var="newrelic_api_key=${{ secrets.NEWRELIC_API_KEY }}"
+
+      # ── Output final ───────────────────────────────────────────────────
+      - name: Terraform output
+        run: terraform output
