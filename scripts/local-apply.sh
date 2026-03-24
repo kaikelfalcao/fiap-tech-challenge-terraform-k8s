@@ -15,6 +15,8 @@ source "$ENV_FILE"
 TFVARS="${1:-environments/dev.tfvars}"
 REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 NR_KEY="${TF_VAR_newrelic_license_key:?'TF_VAR_newrelic_license_key não definido no .env.local'}"
+NR_ACCOUNT_ID="${TF_VAR_newrelic_account_id:?'TF_VAR_newrelic_account_id não definido no .env.local'}"
+NR_API_KEY="${TF_VAR_newrelic_api_key:?'TF_VAR_newrelic_api_key não definido no .env.local'}"
 
 # ── Bootstrap + init ──────────────────────────────────────────────────────────
 bash scripts/bootstrap.sh
@@ -40,6 +42,8 @@ TF_COMMON_VARS=(
   -var-file="$TFVARS"
   -var="lambda_function_name=${LAMBDA_NAME}"
   -var="newrelic_license_key=${NR_KEY}"
+  -var="newrelic_account_id=${NR_ACCOUNT_ID}"
+  -var="newrelic_api_key=${NR_API_KEY}"
 )
 
 # ── Fase 1: infra base ────────────────────────────────────────────────────────
@@ -71,6 +75,8 @@ TF_COMMON_VARS=(
   -var-file="$TFVARS"
   -var="lambda_function_name=${LAMBDA_NAME}"
   -var="newrelic_license_key=${NR_KEY}"
+  -var="newrelic_account_id=${NR_ACCOUNT_ID}"
+  -var="newrelic_api_key=${NR_API_KEY}"
 )
 
 # ── Fase 2: Kong routes + manifests ──────────────────────────────────────────

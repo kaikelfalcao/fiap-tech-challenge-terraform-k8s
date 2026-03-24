@@ -80,6 +80,8 @@ export AWS_DEFAULT_REGION=us-east-1
 
 # ── Secrets da aplicação ───────────────────────────────────────────────────────
 export TF_VAR_newrelic_license_key=${NEWRELIC_LICENSE_KEY}
+export TF_VAR_newrelic_account_id=${NEWRELIC_ACCOUNT_ID}
+export TF_VAR_newrelic_api_key=${NEWRELIC_API_KEY}
 
 # ── Opcional: sobrescreve o nome da Lambda se o repo lambda ainda não foi deployado
 # export TF_VAR_lambda_function_name=autoflow-auth-homolog"
@@ -150,7 +152,9 @@ setup() {
 
   echo "[ $REPO_K8S ]"
   set_aws "$REPO_K8S"
-  set_secret "$REPO_K8S" NEWRELIC_LICENSE_KEY "$NEWRELIC_LICENSE_KEY"
+  set_secret "$REPO_K8S" NEWRELIC_LICENSE_KEY  "$NEWRELIC_LICENSE_KEY"
+  set_secret "$REPO_K8S" NEWRELIC_ACCOUNT_ID   "$NEWRELIC_ACCOUNT_ID"
+  set_secret "$REPO_K8S" NEWRELIC_API_KEY       "$NEWRELIC_API_KEY"
 
   echo ""
   echo "[ $REPO_DB ]"
@@ -166,10 +170,12 @@ setup() {
   echo ""
   echo "[ $REPO_CODEBASE ]"
   set_aws "$REPO_CODEBASE"
-  set_secret "$REPO_CODEBASE" JWT_SECRET          "$JWT_SECRET"
+  set_secret "$REPO_CODEBASE" JWT_SECRET           "$JWT_SECRET"
   set_secret "$REPO_CODEBASE" NEWRELIC_LICENSE_KEY "$NEWRELIC_LICENSE_KEY"
-  set_secret "$REPO_CODEBASE" DOCKER_USERNAME      "$DOCKER_USERNAME"
-  set_secret "$REPO_CODEBASE" DOCKER_PASSWORD      "$DOCKER_PASSWORD"
+  set_secret "$REPO_CODEBASE" NEWRELIC_ACCOUNT_ID  "$NEWRELIC_ACCOUNT_ID"
+  set_secret "$REPO_CODEBASE" NEWRELIC_API_KEY      "$NEWRELIC_API_KEY"
+  set_secret "$REPO_CODEBASE" DOCKER_USERNAME       "$DOCKER_USERNAME"
+  set_secret "$REPO_CODEBASE" DOCKER_PASSWORD       "$DOCKER_PASSWORD"
 
   echo ""
   write_all_local_envs
