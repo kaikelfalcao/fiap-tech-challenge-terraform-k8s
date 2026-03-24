@@ -18,5 +18,9 @@ terraform {
       source  = "gavinbunney/kubectl"
       version = "~> 1.14"
     }
+    newrelic = {
+      source  = "newrelic/newrelic"
+      version = "~> 3.30"
+    }
   }
 }

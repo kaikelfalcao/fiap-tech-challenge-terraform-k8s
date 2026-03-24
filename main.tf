@@ -1,3 +1,13 @@
+terraform {
+  backend "s3" {
+    bucket         = "fiap-tech-challenge-tfstate-fase3-matheus"
+    key            = "k8s-infra/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "fiap-tech-challenge-tflock-matheus"
+    encrypt        = true
+  }
+}
+
 provider "aws" {
   region = var.region
 
@@ -45,3 +55,9 @@ provider "kubectl" {
 }
 
 data "aws_caller_identity" "current" {}
+
+provider "newrelic" {
+  account_id = var.newrelic_account_id
+  api_key    = var.newrelic_api_key
+  region     = "US"
+}

@@ -2,7 +2,9 @@ name: Terraform PR Validation
 
 on:
   pull_request:
-    branches: [main]
+    branches:
+      - develop
+      - main
 
 concurrency:
   group: terraform-pr-${{ github.event.pull_request.base.ref }}
@@ -10,7 +12,6 @@ concurrency:
 
 env:
   AWS_REGION: us-east-1
-  TF_VAR_FILE: environments/dev.tfvars
 
 jobs:
   validate:
@@ -30,28 +31,20 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Bootstrap S3 backend
+      - name: Resolve tfvars file
         run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          BUCKET="fiap-tc-tfstate-${ACCOUNT_ID}"
-          aws s3 ls "s3://${BUCKET}" > /dev/null 2>&1 || \
-            aws s3 mb "s3://${BUCKET}" --region ${{ env.AWS_REGION }}
-          cat > backend.tf << EOF
-          terraform {
-            backend "s3" {
-              bucket       = "${BUCKET}"
-              key          = "k8s-infra/terraform.tfstate"
-              region       = "${{ env.AWS_REGION }}"
-              use_lockfile = true
-              encrypt      = true
-            }
-          }
-          EOF
-          echo "TFSTATE_BUCKET=${BUCKET}" >> "$GITHUB_ENV"
+          if [[ "${{ github.base_ref }}" == "main" ]]; then
+            echo "TF_VAR_FILE=environments/prod.tfvars" >> "$GITHUB_ENV"
+          elif [[ "${{ github.base_ref }}" == "develop" ]]; then
+            echo "TF_VAR_FILE=environments/staging.tfvars" >> "$GITHUB_ENV"
+          else
+            echo "TF_VAR_FILE=environments/dev.tfvars" >> "$GITHUB_ENV"
+          fi
 
       - name: Resolve lambda_function_name from S3 state
         run: |
-          LAMBDA_NAME=$(aws s3 cp "s3://${TFSTATE_BUCKET}/lambda/terraform.tfstate" - 2>/dev/null | \
+          BUCKET="fiap-tech-challenge-tfstate-fase3-matheus"
+          LAMBDA_NAME=$(aws s3 cp "s3://${BUCKET}/lambda/terraform.tfstate" - 2>/dev/null | \
             jq -r '.outputs.function_name.value // empty' 2>/dev/null || true)
           LAMBDA_NAME="${LAMBDA_NAME:-autoflow-auth-homolog}"
           echo "LAMBDA_FUNCTION_NAME=${LAMBDA_NAME}" >> "$GITHUB_ENV"
@@ -65,4 +58,7 @@ jobs:
           terraform plan -lock=false -input=false -no-color \
             -var-file="${{ env.TF_VAR_FILE }}" \
             -var="newrelic_license_key=${{ secrets.NEWRELIC_LICENSE_KEY }}" \
+            -var="newrelic_account_id=${{ secrets.NEWRELIC_ACCOUNT_ID }}" \
+            -var="newrelic_api_key=${{ secrets.NEWRELIC_API_KEY }}" \
+            -var="newrelic_alert_email=${{ secrets.NEWRELIC_ALERT_EMAIL }}" \
             -var="lambda_function_name=${{ env.LAMBDA_FUNCTION_NAME }}"
