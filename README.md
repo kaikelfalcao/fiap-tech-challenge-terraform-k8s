@@ -1,7 +1,8 @@
 # fiap-tech-challenge-terraform-k8s
 
-Infraestrutura Kubernetes do **AutoFlow** — provisiona EKS, Kong API Gateway,
-New Relic e todos os recursos de rede via Terraform.
+Infraestrutura Kubernetes do **AutoFlow** — provisiona VPC, EKS, Kong API Gateway,
+New Relic e Security Groups via Terraform. É o **primeiro repo a ser deployado**
+e fornece outputs (via S3 remote state) para todos os outros repos.
 
 ## Tecnologias
 
@@ -108,13 +109,23 @@ scripts/
 
 O repo provisiona monitoramento completo via New Relic:
 
-| Recurso | Descrição |
-|---|---|
-| `nri-bundle` | Coleta métricas K8s, logs e eventos (Fluent Bit) |
+| Recurso                  | Descrição                                                                                       |
+| ------------------------ | ----------------------------------------------------------------------------------------------- |
+| `nri-bundle`             | Coleta métricas K8s, logs e eventos (Fluent Bit)                                                |
 | `newrelic_one_dashboard` | Dashboard com 4 páginas: Ordens de Serviço, APIs & Performance, Kubernetes, Erros & Integrações |
-| `newrelic_alert_policy` | 5 condições: taxa de erros, latência P95, pod fora do ar, erros de integração, falhas em ordens |
+| `newrelic_alert_policy`  | 5 condições: taxa de erros, latência P95, pod fora do ar, erros de integração, falhas em ordens |
 
 Acesse os dashboards em **[one.newrelic.com](https://one.newrelic.com)** após o deploy.
+
+### Alertas configurados
+
+| Condição                             | Warning  | Critical | Janela |
+| ------------------------------------ | -------- | -------- | ------ |
+| Taxa de Erros HTTP (`autoflow-tc`)   | > 1%     | > 5%     | 5 min  |
+| Latência P95 (`autoflow-tc`)         | > 1000ms | > 2000ms | 5 min  |
+| Pods fora do ar (namespace autoflow) | —        | > 0      | 2 min  |
+| Erros de integração externa          | > 0      | > 5      | 5 min  |
+| Falhas em ordens de serviço          | > 1      | > 3      | 5 min  |
 
 ## Configurar secrets no GitHub
 
