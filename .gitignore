@@ -1,4 +1,6 @@
 backend.tf
+.env.local
+secret.env
 
 override.tf
 override.tf.json

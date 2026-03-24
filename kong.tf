@@ -68,8 +68,8 @@ resource "kubernetes_service" "auth_lambda_dummy" {
   depends_on = [helm_release.kong]
 }
 
-resource "kubernetes_manifest" "kong_plugin_auth_lambda" {
-  manifest = {
+resource "kubectl_manifest" "kong_plugin_auth_lambda" {
+  yaml_body = yamlencode({
     apiVersion = "configuration.konghq.com/v1"
     kind       = "KongPlugin"
     metadata = {
@@ -78,13 +78,13 @@ resource "kubernetes_manifest" "kong_plugin_auth_lambda" {
     }
     plugin = "aws-lambda"
     config = local.kong_lambda_config
-  }
+  })
 
   depends_on = [helm_release.kong]
 }
 
-resource "kubernetes_manifest" "kong_ingress_auth" {
-  manifest = {
+resource "kubectl_manifest" "kong_ingress_auth" {
+  yaml_body = yamlencode({
     apiVersion = "networking.k8s.io/v1"
     kind       = "Ingress"
     metadata = {
@@ -112,11 +112,11 @@ resource "kubernetes_manifest" "kong_ingress_auth" {
         }
       }]
     }
-  }
+  })
 
   depends_on = [
     helm_release.kong,
-    kubernetes_manifest.kong_plugin_auth_lambda,
+    kubectl_manifest.kong_plugin_auth_lambda,
     kubernetes_service.auth_lambda_dummy,
   ]
 }
@@ -141,8 +141,8 @@ resource "kubernetes_service" "autoflow_app" {
   depends_on = [helm_release.kong]
 }
 
-resource "kubernetes_manifest" "kong_ingress_api" {
-  manifest = {
+resource "kubectl_manifest" "kong_ingress_api" {
+  yaml_body = yamlencode({
     apiVersion = "networking.k8s.io/v1"
     kind       = "Ingress"
     metadata = {
@@ -171,7 +171,7 @@ resource "kubernetes_manifest" "kong_ingress_api" {
         }
       }]
     }
-  }
+  })
 
   depends_on = [
     helm_release.kong,

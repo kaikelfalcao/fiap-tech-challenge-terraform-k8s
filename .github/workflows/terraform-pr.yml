@@ -2,7 +2,7 @@ name: Terraform PR Validation
 
 on:
   pull_request:
-    branches: [develop, main]
+    branches: [main]
 
 concurrency:
   group: terraform-pr-${{ github.event.pull_request.base.ref }}
@@ -34,7 +34,8 @@ jobs:
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           BUCKET="fiap-tc-tfstate-${ACCOUNT_ID}"
-          aws s3 ls "s3://${BUCKET}" > /dev/null 2>&1 || aws s3 mb "s3://${BUCKET}" --region ${{ env.AWS_REGION }}
+          aws s3 ls "s3://${BUCKET}" > /dev/null 2>&1 || \
+            aws s3 mb "s3://${BUCKET}" --region ${{ env.AWS_REGION }}
           cat > backend.tf << EOF
           terraform {
             backend "s3" {
@@ -46,6 +47,14 @@ jobs:
             }
           }
           EOF
+          echo "TFSTATE_BUCKET=${BUCKET}" >> "$GITHUB_ENV"
+
+      - name: Resolve lambda_function_name from S3 state
+        run: |
+          LAMBDA_NAME=$(aws s3 cp "s3://${TFSTATE_BUCKET}/lambda/terraform.tfstate" - 2>/dev/null | \
+            jq -r '.outputs.function_name.value // empty' 2>/dev/null || true)
+          LAMBDA_NAME="${LAMBDA_NAME:-autoflow-auth-homolog}"
+          echo "LAMBDA_FUNCTION_NAME=${LAMBDA_NAME}" >> "$GITHUB_ENV"
 
       - run: terraform init -input=false
       - run: terraform fmt -check -recursive
@@ -56,4 +65,4 @@ jobs:
           terraform plan -lock=false -input=false -no-color \
             -var-file="${{ env.TF_VAR_FILE }}" \
             -var="newrelic_license_key=${{ secrets.NEWRELIC_LICENSE_KEY }}" \
-            -var="lambda_function_name=${{ secrets.LAMBDA_FUNCTION_NAME }}"
+            -var="lambda_function_name=${{ env.LAMBDA_FUNCTION_NAME }}"

@@ -86,7 +86,8 @@ variable "newrelic_license_key" {
 }
 
 variable "lambda_function_name" {
-  description = "Nome da função Lambda de autenticação"
+  description = "Nome da função Lambda de autenticação (lido do state S3 na pipeline; use como fallback local)"
   type        = string
   default     = "autoflow-auth-homolog"
 }
+

@@ -2,7 +2,7 @@ name: Terraform Deploy
 
 on:
   push:
-    branches: [develop, main]
+    branches: [main]
 
 concurrency:
   group: terraform-deploy-${{ github.ref_name }}
@@ -10,13 +10,12 @@ concurrency:
 
 env:
   AWS_REGION: us-east-1
-  CLUSTER_NAME: fiap-tc-dev-eks
   TF_VAR_FILE: environments/dev.tfvars
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'main' && 'production' || 'develop' }}
+    environment: production
 
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +35,15 @@ jobs:
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           BUCKET="fiap-tc-tfstate-${ACCOUNT_ID}"
-          aws s3 ls "s3://${BUCKET}" > /dev/null 2>&1 || aws s3 mb "s3://${BUCKET}" --region ${{ env.AWS_REGION }}
+          aws s3 ls "s3://${BUCKET}" > /dev/null 2>&1 || \
+            aws s3 mb "s3://${BUCKET}" --region ${{ env.AWS_REGION }}
+          aws s3api put-bucket-versioning \
+            --bucket "$BUCKET" \
+            --versioning-configuration Status=Enabled 2>/dev/null || true
+          aws s3api put-bucket-encryption \
+            --bucket "$BUCKET" \
+            --server-side-encryption-configuration \
+            '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}' 2>/dev/null || true
           cat > backend.tf << EOF
           terraform {
             backend "s3" {
@@ -48,6 +55,17 @@ jobs:
             }
           }
           EOF
+          echo "TFSTATE_BUCKET=${BUCKET}" >> "$GITHUB_ENV"
+
+      # Lê lambda_function_name do state S3 do repo lambda.
+      # Se o repo lambda ainda não foi deployado, usa o valor padrão da variável.
+      - name: Resolve lambda_function_name from S3 state
+        run: |
+          LAMBDA_NAME=$(aws s3 cp "s3://${TFSTATE_BUCKET}/lambda/terraform.tfstate" - 2>/dev/null | \
+            jq -r '.outputs.function_name.value // empty' 2>/dev/null || true)
+          LAMBDA_NAME="${LAMBDA_NAME:-autoflow-auth-homolog}"
+          echo "LAMBDA_FUNCTION_NAME=${LAMBDA_NAME}" >> "$GITHUB_ENV"
+          echo "lambda_function_name resolved: ${LAMBDA_NAME}"
 
       - run: terraform init -input=false
 
@@ -56,7 +74,7 @@ jobs:
           terraform apply -auto-approve -input=false \
             -var-file="${{ env.TF_VAR_FILE }}" \
             -var="newrelic_license_key=${{ secrets.NEWRELIC_LICENSE_KEY }}" \
-            -var="lambda_function_name=${{ secrets.LAMBDA_FUNCTION_NAME }}" \
+            -var="lambda_function_name=${{ env.LAMBDA_FUNCTION_NAME }}" \
             -target=module.vpc \
             -target=module.eks \
             -target=aws_security_group.rds \
@@ -64,14 +82,23 @@ jobs:
             -target=helm_release.kong \
             -target=helm_release.newrelic \
             -target=kubernetes_namespace.kong \
-            -target=kubernetes_namespace.newrelic
+            -target=kubernetes_namespace.newrelic \
+            -target=kubernetes_namespace.autoflow
 
       - name: Configure kubectl
-        run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
+        run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name fiap-tc-dev-eks
+
+      # Relê o lambda_function_name — pode ter sido atualizado entre a Fase 1 e aqui.
+      - name: Refresh lambda_function_name
+        run: |
+          LAMBDA_NAME=$(aws s3 cp "s3://${TFSTATE_BUCKET}/lambda/terraform.tfstate" - 2>/dev/null | \
+            jq -r '.outputs.function_name.value // empty' 2>/dev/null || true)
+          LAMBDA_NAME="${LAMBDA_NAME:-${{ env.LAMBDA_FUNCTION_NAME }}}"
+          echo "LAMBDA_FUNCTION_NAME=${LAMBDA_NAME}" >> "$GITHUB_ENV"
 
       - name: Apply — Fase 2 (Kong routes + manifests)
         run: |
           terraform apply -auto-approve -input=false \
             -var-file="${{ env.TF_VAR_FILE }}" \
             -var="newrelic_license_key=${{ secrets.NEWRELIC_LICENSE_KEY }}" \
-            -var="lambda_function_name=${{ secrets.LAMBDA_FUNCTION_NAME }}"
+            -var="lambda_function_name=${{ env.LAMBDA_FUNCTION_NAME }}"

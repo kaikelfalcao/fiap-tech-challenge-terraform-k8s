@@ -14,6 +14,47 @@ New Relic e todos os recursos de rede via Terraform.
 | Observabilidade | New Relic nri-bundle 5.0                |
 | CI/CD           | GitHub Actions                          |
 
+## Arquitetura
+
+```
+Internet
+    │
+    ▼
+Kong (NLB público)
+    ├── POST /auth  →  aws-lambda plugin  →  Lambda (autoflow-auth-homolog)
+    └── /api/*      →  autoflow.autoflow.svc.cluster.local (NestJS)
+                               │
+                               ▼
+                         RDS PostgreSQL
+                         (subnet privada)
+```
+
+## Posição no fluxo multi-repo
+
+Este é o **primeiro repo a ser deployado**. Os outros repos leem seus outputs
+do state S3 — nenhum valor de infra precisa ser copiado manualmente.
+
+```
+1. k8s  (este repo, Fase 1)  →  cria VPC, EKS, SGs, Kong, New Relic
+2. db                        →  lê subnets + SG deste state, cria RDS
+3. lambda                    →  lê subnets + SG deste state + DB do state db
+4. k8s  (Fase 2, automático) →  lê function_name do state lambda, cria rotas Kong
+5. codebase                  →  lê DB do state db, deploya no EKS
+```
+
+O state deste repo fica em:
+`s3://fiap-tc-tfstate-{ACCOUNT_ID}/k8s-infra/terraform.tfstate`
+
+Outputs usados pelos outros repos:
+
+| Output                     | Usado por         |
+| -------------------------- | ----------------- |
+| `private_subnet_ids`       | db, lambda        |
+| `rds_security_group_id`    | db                |
+| `lambda_security_group_id` | lambda            |
+| `cluster_name`             | codebase          |
+| `vpc_id`                   | db, lambda        |
+
 ## Estrutura
 
 ```
@@ -22,145 +63,147 @@ vpc.tf              ← VPC, subnets públicas/privadas, NAT gateway
 kong.tf             ← Kong Helm release + rotas /auth e /api/*
 newrelic.tf         ← New Relic nri-bundle (infra, logs, eventos)
 security-groups.tf  ← SGs do RDS e da Lambda
+k8s_secrets.tf      ← namespace autoflow + kubernetes_secret app-secrets (JWT)
 outputs.tf          ← endpoints, IDs de SG e subnets
 variables.tf        ← todas as variáveis com descrições
 versions.tf         ← versões dos providers
 
 environments/
-  dev.tfvars        ← configuração para desenvolvimento
-  staging.tfvars    ← configuração para homologação
-  prod.tfvars        ← configuração para produção
+  dev.tfvars        ← configuração de desenvolvimento
+  staging.tfvars    ← configuração de homologação
+  prod.tfvars       ← configuração de produção
 
 scripts/
   bootstrap.sh      ← cria bucket S3 e gera backend.tf
+  local-plan.sh     ← valida plano localmente
+  local-apply.sh    ← aplica Fase 1 + Fase 2 localmente
+  local-destroy.sh  ← destrói tudo localmente (com confirmação)
 ```
 
-## Arquitetura
+## Configurar secrets no GitHub
 
-```
-Internet
-    │
-    ▼
-Kong API Gateway (NLB público)
-    ├── POST /auth → aws-lambda plugin → Lambda de autenticação
-    └── /api/*    → autoflow.autoflow.svc.cluster.local (NestJS)
-                           │
-                           ▼
-                     RDS PostgreSQL
-                     (subnet privada)
-```
+O script `scripts/set-github-secrets.sh` configura os secrets em **todos os 4 repos** e gera o `.env.local` para uso local — tudo a partir do mesmo `secret.env`.
 
-## Pré-requisitos
+| Modo | O que faz |
+|------|-----------|
+| `setup` | Seta todos os secrets nos 4 repos + gera `.env.local` |
+| `refresh` | Renova credenciais AWS nos 4 repos + atualiza `.env.local` |
+| `local` | Só gera/atualiza `.env.local`, sem tocar no GitHub |
 
-- Terraform 1.7+
-- AWS CLI configurado
-- kubectl
-- Credenciais AWS com LabRole (AWS Academy)
-
-## Deploy manual
-
-### AWS Lab — configurar credenciais
+### Primeira vez (setup completo)
 
 ```bash
-aws configure set aws_access_key_id     <KEY>    --profile lab
-aws configure set aws_secret_access_key <SECRET> --profile lab
-aws configure set aws_session_token     <TOKEN>  --profile lab
-export AWS_PROFILE=lab
+# Pré-requisito: gh auth login
+cp secret.env.example secret.env
+# edite secret.env com todos os valores
+./scripts/set-github-secrets.sh setup
+# → GitHub secrets setados + .env.local gerado automaticamente
 ```
 
-### Bootstrap do backend S3
+### Renovar credenciais AWS (~4h)
+
+Cole as novas credenciais do painel AWS Academy no `secret.env` e execute:
 
 ```bash
-bash scripts/bootstrap.sh
+./scripts/set-github-secrets.sh refresh
+# → Atualiza AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN
+#   nos 4 repos E no .env.local em um único comando
 ```
 
-### Fase 1 — EKS + Kong + New Relic (~15 min)
+### Só atualizar .env.local (sem GitHub)
 
 ```bash
-rm -rf .terraform .terraform.lock.hcl
-terraform init
-
-terraform apply \
-  -var-file="./environments/dev.tfvars" \
-  -var="newrelic_license_key=<NR_KEY>" \
-  -var="lambda_function_name=autoflow-auth-homolog" \
-  -target=module.vpc \
-  -target=module.eks \
-  -target=aws_security_group.rds \
-  -target=aws_security_group.lambda \
-  -target=helm_release.kong \
-  -target=helm_release.newrelic \
-  -target=kubernetes_namespace.kong \
-  -target=kubernetes_namespace.newrelic
+./scripts/set-github-secrets.sh local
+source .env.local
 ```
 
-### Configura kubectl
+## Secrets por repo
+
+| Secret                  | Descrição                                         |
+| ----------------------- | ------------------------------------------------- |
+| `AWS_ACCESS_KEY_ID`     | Credencial AWS Lab                                |
+| `AWS_SECRET_ACCESS_KEY` | Credencial AWS Lab                                |
+| `AWS_SESSION_TOKEN`     | Session token (obrigatório no Lab, expira em ~4h) |
+| `NEWRELIC_LICENSE_KEY`  | Chave de ingest do New Relic                      |
+
+> `lambda_function_name` não é um secret — é lido automaticamente do state S3
+> do repo lambda durante o deploy.
+>
+> `JWT_SECRET` é gerenciado pelo **repo codebase**, que cria o
+> `kubernetes_secret autoflow-secrets` no namespace `autoflow`.
+
+## CI/CD
+
+| Evento         | Comportamento                               |
+| -------------- | ------------------------------------------- |
+| PR para `main` | `terraform fmt` + `validate` + `plan`       |
+| Merge em `main`| Deploy completo (Fase 1 + Fase 2)           |
+
+## Subir localmente
+
+### 1. Pré-requisitos
 
 ```bash
-aws eks update-kubeconfig --region us-east-1 --name fiap-tc-dev-eks
+# Instalar: terraform, aws cli, kubectl, jq
+terraform version   # >= 1.7
+aws --version
+kubectl version --client
+jq --version
+```
+
+### 2. Credenciais AWS Lab
+
+Copie as credenciais do painel do AWS Academy:
+
+```bash
+cp .env.local.example .env.local
+# edite .env.local com AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN
+```
+
+### 3. Fase 1 — infra base (~15 min)
+
+```bash
+./scripts/local-apply.sh environments/dev.tfvars
+```
+
+Isso executa automaticamente:
+- `bootstrap.sh` (cria bucket S3, gera `backend.tf`)
+- `terraform init`
+- `terraform apply` com targets de Fase 1 (VPC, EKS, SGs, Kong, New Relic, namespaces, JWT secret)
+- `aws eks update-kubeconfig`
+- `terraform apply` completo (Fase 2 — rotas Kong, lê lambda function name do S3)
+
+### 4. Verificar
+
+```bash
 kubectl get nodes
-```
-
-### Fase 2 — Kong routes + manifests
-
-```bash
-terraform apply \
-  -var-file="./environments/dev.tfvars" \
-  -var="newrelic_license_key=<NR_KEY>" \
-  -var="lambda_function_name=autoflow-auth-homolog"
-```
-
-### Verificar
-
-```bash
-# Nodes
-kubectl get nodes
-
-# Kong
 kubectl get pods -n kong
-kubectl get ingress -n kong
-
-# New Relic
 kubectl get pods -n newrelic
-
-# URL do Kong
 kubectl get svc -n kong kong-kong-proxy \
   -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 ```
 
-## CI/CD
-
-| Evento            | Comportamento                                         |
-| ----------------- | ----------------------------------------------------- |
-| PR para `main`    | Validate + fmt check + terraform plan comentado no PR |
-| Push em `develop` | Deploy automático (ambiente develop)                  |
-| Merge em `main`   | Deploy para produção (requer aprovação no GitHub)     |
-
-### Secrets necessários
-
-| Secret                  | Descrição                                           |
-| ----------------------- | --------------------------------------------------- |
-| `AWS_ACCESS_KEY_ID`     | Credencial AWS Lab                                  |
-| `AWS_SECRET_ACCESS_KEY` | Credencial AWS Lab                                  |
-| `AWS_SESSION_TOKEN`     | Session token (obrigatório no Lab)                  |
-| `NEWRELIC_LICENSE_KEY`  | Chave de ingest do New Relic                        |
-| `LAMBDA_FUNCTION_NAME`  | Nome da função Lambda (ex: `autoflow-auth-homolog`) |
-
-## Outputs importantes
-
-Após o apply, os outputs são usados pelos outros repos:
+### 5. Validar sem aplicar
 
 ```bash
-terraform output private_subnet_ids      # usado pelo repo lambda
-terraform output lambda_security_group_id # usado pelo repo lambda
-terraform output rds_security_group_id   # usado pelo repo db
-terraform output cluster_name            # usado pelo repo codebase
-terraform output kong_proxy_url          # URL pública do Kong
+./scripts/local-plan.sh environments/dev.tfvars
 ```
+
+### 6. Destruir
+
+```bash
+# Destrói a infra
+./scripts/local-destroy.sh
+
+# Destrói a infra E remove o bucket S3 de state (apaga states de todos os repos)
+./scripts/local-destroy.sh --purge-bucket
+```
+
+O script pede confirmação digitando `destroy` antes de executar.
 
 ## Observações AWS Lab
 
 - O lab bloqueia `iam:CreateRole` e `iam:CreateOpenIDConnectProvider`
 - Todos os recursos usam a `LabRole` existente (`enable_irsa = false`)
-- O session token expira em ~4h — atualize os secrets antes de cada deploy
-- O `backend.tf` é gerado pelo `bootstrap.sh` e não é versionado
+- O session token expira em ~4h — atualize as credenciais antes de cada deploy
+- `backend.tf` é gerado pelo `bootstrap.sh` e está no `.gitignore`

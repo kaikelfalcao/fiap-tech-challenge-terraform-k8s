@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-REGION=${AWS_REGION:-us-east-1}
+REGION=${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 BUCKET="fiap-tc-tfstate-${ACCOUNT_ID}"
 
