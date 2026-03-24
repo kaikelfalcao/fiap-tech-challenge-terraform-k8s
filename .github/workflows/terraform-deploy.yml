@@ -62,7 +62,6 @@ jobs:
             -var="newrelic_license_key=${{ secrets.NEWRELIC_LICENSE_KEY }}" \
             -var="newrelic_account_id=${{ secrets.NEWRELIC_ACCOUNT_ID }}" \
             -var="newrelic_api_key=${{ secrets.NEWRELIC_API_KEY }}" \
-            -var="newrelic_alert_email=${{ secrets.NEWRELIC_ALERT_EMAIL }}" \
             -var="lambda_function_name=${{ env.LAMBDA_FUNCTION_NAME }}" \
             -target=module.vpc \
             -target=module.eks \
@@ -93,5 +92,4 @@ jobs:
             -var="newrelic_license_key=${{ secrets.NEWRELIC_LICENSE_KEY }}" \
             -var="newrelic_account_id=${{ secrets.NEWRELIC_ACCOUNT_ID }}" \
             -var="newrelic_api_key=${{ secrets.NEWRELIC_API_KEY }}" \
-            -var="newrelic_alert_email=${{ secrets.NEWRELIC_ALERT_EMAIL }}" \
             -var="lambda_function_name=${{ env.LAMBDA_FUNCTION_NAME }}"

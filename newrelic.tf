@@ -25,7 +25,7 @@ resource "helm_release" "newrelic" {
     global:
       licenseKey: "${var.newrelic_license_key}"
       cluster: "${module.eks.cluster_name}"
-      lowDataMode: false
+      lowDataMode: true
 
     newrelic-infrastructure:
       enabled: true

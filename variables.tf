@@ -96,12 +96,6 @@ variable "newrelic_api_key" {
   sensitive   = true
 }
 
-variable "newrelic_alert_email" {
-  description = "E-mail para receber notificações de alertas (opcional)"
-  type        = string
-  default     = ""
-}
-
 variable "lambda_function_name" {
   description = "Nome da função Lambda de autenticação (lido do state S3 na pipeline; use como fallback local)"
   type        = string

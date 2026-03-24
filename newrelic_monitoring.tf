@@ -601,51 +601,5 @@ resource "newrelic_nrql_alert_condition" "service_order_failures" {
   aggregation_delay  = 120
 }
 
-# ── Notificação por e-mail (opcional) ────────────────────────────────────────
-resource "newrelic_notification_destination" "email" {
-  count = var.newrelic_alert_email != "" ? 1 : 0
-
-  name = "autoflow-email-alerts"
-  type = "EMAIL"
-
-  property {
-    key   = "email"
-    value = var.newrelic_alert_email
-  }
-}
-
-resource "newrelic_notification_channel" "email" {
-  count = var.newrelic_alert_email != "" ? 1 : 0
-
-  name           = "autoflow-email-channel"
-  type           = "EMAIL"
-  destination_id = newrelic_notification_destination.email[0].id
-  product        = "IINT"
-
-  property {
-    key   = "subject"
-    value = "AutoFlow — Alerta: {{issueTitle}}"
-  }
-}
-
-resource "newrelic_workflow" "autoflow" {
-  count = var.newrelic_alert_email != "" ? 1 : 0
-
-  name                  = "autoflow-alert-workflow"
-  muting_rules_handling = "NOTIFY_ALL_ISSUES"
-
-  issues_filter {
-    name = "autoflow-policy-filter"
-    type = "FILTER"
-
-    predicate {
-      attribute = "labels.policyIds"
-      operator  = "EXACTLY_MATCHES"
-      values    = [newrelic_alert_policy.autoflow.id]
-    }
-  }
-
-  destination {
-    channel_id = newrelic_notification_channel.email[0].id
-  }
-}
+# Notificações via workflow não estão disponíveis no free tier do New Relic.
+# Alertas disparam na UI em: alerts.newrelic.com

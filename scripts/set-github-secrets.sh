@@ -82,7 +82,6 @@ export AWS_DEFAULT_REGION=us-east-1
 export TF_VAR_newrelic_license_key=${NEWRELIC_LICENSE_KEY}
 export TF_VAR_newrelic_account_id=${NEWRELIC_ACCOUNT_ID}
 export TF_VAR_newrelic_api_key=${NEWRELIC_API_KEY}
-export TF_VAR_newrelic_alert_email=${NEWRELIC_ALERT_EMAIL}
 
 # ── Opcional: sobrescreve o nome da Lambda se o repo lambda ainda não foi deployado
 # export TF_VAR_lambda_function_name=autoflow-auth-homolog"
@@ -156,7 +155,6 @@ setup() {
   set_secret "$REPO_K8S" NEWRELIC_LICENSE_KEY  "$NEWRELIC_LICENSE_KEY"
   set_secret "$REPO_K8S" NEWRELIC_ACCOUNT_ID   "$NEWRELIC_ACCOUNT_ID"
   set_secret "$REPO_K8S" NEWRELIC_API_KEY       "$NEWRELIC_API_KEY"
-  set_secret "$REPO_K8S" NEWRELIC_ALERT_EMAIL   "$NEWRELIC_ALERT_EMAIL"
 
   echo ""
   echo "[ $REPO_DB ]"
@@ -176,7 +174,6 @@ setup() {
   set_secret "$REPO_CODEBASE" NEWRELIC_LICENSE_KEY "$NEWRELIC_LICENSE_KEY"
   set_secret "$REPO_CODEBASE" NEWRELIC_ACCOUNT_ID  "$NEWRELIC_ACCOUNT_ID"
   set_secret "$REPO_CODEBASE" NEWRELIC_API_KEY      "$NEWRELIC_API_KEY"
-  set_secret "$REPO_CODEBASE" NEWRELIC_ALERT_EMAIL  "$NEWRELIC_ALERT_EMAIL"
   set_secret "$REPO_CODEBASE" DOCKER_USERNAME       "$DOCKER_USERNAME"
   set_secret "$REPO_CODEBASE" DOCKER_PASSWORD       "$DOCKER_PASSWORD"
 
