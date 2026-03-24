@@ -35,11 +35,9 @@ jobs:
 
       - name: Resolve tfvars file
         run: |
-          if [[ "${{ github.ref_name }}" == "main" ]]; then
-            echo "TF_VAR_FILE=environments/prod.tfvars" >> "$GITHUB_ENV"
-          else
-            echo "TF_VAR_FILE=environments/staging.tfvars" >> "$GITHUB_ENV"
-          fi
+          # AWS Lab só suporta dev — uma única conta com limite de EIPs e roles.
+          # Todos os branches usam dev.tfvars para evitar estourar cotas do Lab.
+          echo "TF_VAR_FILE=environments/dev.tfvars" >> "$GITHUB_ENV"
 
       # Lê lambda_function_name do state S3 do repo lambda.
       # Se o repo lambda ainda não foi deployado, usa o valor padrão da variável.
@@ -54,6 +52,16 @@ jobs:
           echo "lambda_function_name resolved: ${LAMBDA_NAME}"
 
       - run: terraform init -input=false
+
+      - name: Limpar log group existente (AWS Lab re-apply)
+        run: |
+          # O módulo EKS tenta criar o log group mas ele pode já existir de um apply anterior.
+          # Remove preventivamente para evitar ResourceAlreadyExistsException.
+          CLUSTER="fiap-tc-dev-eks"
+          aws logs delete-log-group \
+            --log-group-name "/aws/eks/${CLUSTER}/cluster" \
+            --region "$AWS_REGION" 2>/dev/null \
+            && echo "Log group deletado" || echo "Log group não existia, ok"
 
       - name: Apply — Fase 1 (infra base)
         run: |
